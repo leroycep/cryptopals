@@ -22,7 +22,7 @@ fn hexToBytes(allocator: *Allocator, input: []const u8) ![]u8 {
 fn hexCharToNibble(char: u8) !u4 {
     if (char >= '0' and char <= '9') {
         return @intCast(u4, char & 0b1111);
-    } else if (char >= 'A' and char <= 'F') {
+    } else if ((char >= 'A' and char <= 'F') or (char >= 'a' and char <= 'f')) {
         return 9 + @intCast(u4, char & 0b1111);
     } else {
         return error.InvalidCharacter;
@@ -40,6 +40,7 @@ test "hex string to bytes" {
     const allocator = std.testing.allocator;
 
     try expectHexToBytes(allocator, &[_]u8{ 0xDE, 0xAD, 0xBE, 0xEF }, "DEADBEEF");
+    try expectHexToBytes(allocator, &[_]u8{ 0xDE, 0xAD, 0xBE, 0xEF }, "deadbeef");
     try expectHexToBytes(allocator, &[_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 }, "123456789ABCDEF0");
 }
 
