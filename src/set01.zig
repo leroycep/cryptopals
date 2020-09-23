@@ -35,26 +35,97 @@ test "challenge 2: fixed xor" {
     std.testing.expectEqualSlices(u8, expected, x1);
 }
 
-test "challenge 3: single-byte xor cipher" {
-    const allocator = std.testing.allocator;
+const SingleByteXorBreak = struct {
+    allocator: *std.mem.Allocator,
+    ciphertext: []u8,
+    key: u8,
+    cleartext: []u8,
+    cipher_char_appearances: []freq.CharacterElement,
+
+    pub fn deinit(this: @This()) void {
+        this.allocator.free(this.ciphertext);
+        this.allocator.free(this.cleartext);
+        this.allocator.free(this.cipher_char_appearances);
+    }
+};
+
+fn break_single_byte_xor(allocator: *std.mem.Allocator, hex_text: []const u8) !SingleByteXorBreak {
 
     // Convert ciphertext from hex to bytes
-    var ciphertext = try fmt.hexToBytes(allocator, "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736");
-    defer allocator.free(ciphertext);
+    var ciphertext = try fmt.hexToBytes(allocator, hex_text);
+    errdefer allocator.free(ciphertext);
 
     // Get the list of characters used by frequency
     const characters_by_frequency = try freq.characters_by_frequency(allocator, ciphertext);
-    defer allocator.free(characters_by_frequency);
+    errdefer allocator.free(characters_by_frequency);
 
     // Assume that the top character in the ciphertext and english are the same characters.
     // Use this to find out the key.
     const key = characters_by_frequency[0].character ^ freq.ENGLISH_LETTER_FREQUENCIES[0].character;
 
     var cleartext = try allocator.alloc(u8, ciphertext.len);
-    defer allocator.free(cleartext);
+    errdefer allocator.free(cleartext);
     for (ciphertext) |cipher_text_byte, idx| {
         cleartext[idx] = cipher_text_byte ^ key;
     }
 
-    std.testing.expectEqualSlices(u8, "Cooking MC's like a pound of bacon", cleartext);
+    return SingleByteXorBreak{
+        .allocator = allocator,
+        .ciphertext = ciphertext,
+        .cipher_char_appearances = characters_by_frequency,
+        .key = key,
+        .cleartext = cleartext,
+    };
+}
+
+test "challenge 3: single-byte xor cipher" {
+    const allocator = std.testing.allocator;
+
+    var xor_break = try break_single_byte_xor(allocator, "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736");
+    defer xor_break.deinit();
+
+    std.testing.expectEqualSlices(u8, "Cooking MC's like a pound of bacon", xor_break.cleartext);
+}
+
+test "challenge 4: detect single-byte xor cipher" {
+    const allocator = std.testing.allocator;
+
+    const hex_strings = @embedFile("./set1challenge4.txt");
+    var line_iter = std.mem.tokenize(hex_strings, "\n\r");
+
+    var number_of_single_byte_xors_detected: usize = 0;
+
+    // Loop through each line of the text files
+    line_loop: while (line_iter.next()) |line| {
+        // Try to break the hex-encoded string with a single byte-xor breaker
+        var xor_break = try break_single_byte_xor(allocator, line);
+        defer xor_break.deinit();
+
+        // Check that each character in decrypted string is an english character
+        for (xor_break.cipher_char_appearances) |cipher_char_entry, idx| {
+            const clear_char = cipher_char_entry.character ^ xor_break.key;
+
+            // Try to find matching character in the list of english character frequencies
+            var found_matching_char_entry = false;
+            for (freq.ENGLISH_LETTER_FREQUENCIES) |english_char| {
+                if (english_char.character == clear_char) {
+                    found_matching_char_entry = true;
+                    break;
+                }
+            }
+
+            if (!found_matching_char_entry) {
+                // The decoded string contains a character not found in english.
+                // Continue to the next line
+                continue :line_loop;
+            }
+        }
+
+        // If we get here, the cleartext contains only english characters
+        std.log.info("cleartext: {}\n", .{xor_break.cleartext});
+        number_of_single_byte_xors_detected += 1;
+    }
+
+    // We should see only one line that was encrypted with a single-byte xor
+    std.testing.expectEqual(@as(usize, 1), number_of_single_byte_xors_detected);
 }
