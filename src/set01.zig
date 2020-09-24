@@ -129,3 +129,24 @@ test "challenge 4: detect single-byte xor cipher" {
     // We should see only one line that was encrypted with a single-byte xor
     std.testing.expectEqual(@as(usize, 1), number_of_single_byte_xors_detected);
 }
+
+test "challenge 5: repeating-key XOR" {
+    const allocator = std.testing.allocator;
+
+    const cleartext =
+        \\Burning 'em, if you ain't quick and nimble
+        \\I go crazy when I hear a cymbal
+    ;
+    const key = "ICE";
+
+    const expected_hex = "0b3637272a2b2e63622c2e69692a23693a2a3c6324202d623d63343c2a26226324272765272a282b2f20430a652e2c652a3124333a653e2b2027630c692b20283165286326302e27282f";
+    const expected = try fmt.hexToBytes(allocator, expected_hex);
+    defer allocator.free(expected);
+
+    var ciphertext = try std.mem.dupe(allocator, u8, cleartext);
+    defer allocator.free(ciphertext);
+
+    xor.repeating_xor_slice_in_place(ciphertext, key);
+
+    std.testing.expectEqualSlices(u8, expected, ciphertext);
+}
