@@ -150,3 +150,31 @@ test "challenge 5: repeating-key XOR" {
 
     std.testing.expectEqualSlices(u8, expected, ciphertext);
 }
+
+pub fn hamming_distance(s1: []const u8, s2: []const u8) usize {
+    std.debug.assert(s1.len == s2.len);
+
+    var num_differing_bits: usize = 0;
+
+    for (s1) |s1_byte, idx| {
+        const s2_byte = s2[idx];
+
+        const differing_bits = s1_byte ^ s2_byte;
+
+        var shift: u3 = 0;
+        while (true) {
+            if ((differing_bits >> shift) & 1 == 1) {
+                num_differing_bits += 1;
+            }
+            if (shift == 7) break;
+            shift += 1;
+        }
+    }
+
+    return num_differing_bits;
+}
+
+test "hamming distance" {
+    std.testing.expectEqual(@as(usize, 37), hamming_distance("this is a test", "wokka wokka!!!"));
+    std.testing.expectEqual(@as(usize, 8), hamming_distance(&[_]u8{0xFF}, &[_]u8{0x00}));
+}
