@@ -108,9 +108,9 @@ pub fn detect_aes128_ebc(allocator: *std.mem.Allocator, args_iter: *std.process.
         var seen_blocks = std.AutoHashMap([AES_BLOCK_SIZE]u8, void).init(allocator);
         defer seen_blocks.deinit();
 
-        var index: usize = 0;
-        while (index < line_bytes.len) : (index += AES_BLOCK_SIZE) {
-            const block = line_bytes[index..][0..AES_BLOCK_SIZE];
+        var start_index: usize = 0;
+        while (start_index < line_bytes.len) : (start_index += AES_BLOCK_SIZE) {
+            const block = line_bytes[start_index..][0..AES_BLOCK_SIZE];
 
             const gop = try seen_blocks.getOrPut(block.*);
             if (gop.found_existing) {
@@ -118,4 +118,9 @@ pub fn detect_aes128_ebc(allocator: *std.mem.Allocator, args_iter: *std.process.
             }
         }
     }
+}
+
+test "_" {
+    std.meta.refAllDecls(@import("./set01.zig"));
+    std.meta.refAllDecls(@import("./set02.zig"));
 }
