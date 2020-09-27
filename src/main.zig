@@ -1,11 +1,16 @@
 const std = @import("std");
+const set02 = @import("./set02.zig");
 const AES128 = std.crypto.core.aes.AES128;
 
 const MAX_FILE_SIZE = 50 * 1000 * 1000;
 
 const CMD_DECRYPT_AES128_ECB = "decrypt-aes128-ecb";
 const CMD_DETECT_AES128_ECB = "detect-aes128-ecb";
-const HELP_LIST_SUBCOMMANDS = "  " ++ CMD_DECRYPT_AES128_ECB ++ "\n  " ++ CMD_DETECT_AES128_ECB ++ "\n";
+const CMD_DECRYPT_AES128_CBC = "decrypt-aes128-cbc";
+const HELP_LIST_SUBCOMMANDS = "  " ++ CMD_DECRYPT_AES128_ECB ++
+    "\n  " ++ CMD_DETECT_AES128_ECB ++
+    "\n  " ++ CMD_DECRYPT_AES128_ECB ++
+    "\n";
 
 pub fn main() !void {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -26,6 +31,8 @@ pub fn main() !void {
         try decrypt_aes128_ebc(allocator, &args_iter);
     } else if (std.mem.eql(u8, CMD_DETECT_AES128_ECB, subcommand_str)) {
         try detect_aes128_ebc(allocator, &args_iter);
+    } else if (std.mem.eql(u8, CMD_DECRYPT_AES128_CBC, subcommand_str)) {
+        try set02.decrypt_aes128_cbc(allocator, &args_iter);
     } else {
         std.debug.warn(
             \\Unknown subcommand "{}".
