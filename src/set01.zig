@@ -261,13 +261,13 @@ test "challenge 6: break repeating-key XOR" {
     for (single_byte_xor_breaks) |xor_break, idx| {
         key[idx] = xor_break.key;
     }
-    std.log.warn("key = {X}\n", .{key});
-    std.log.warn("key = \"{}\"\n", .{key});
+    std.log.info("key = {X}\n", .{key});
+    std.log.info("key = \"{}\"\n", .{key});
 
     var cleartext = try std.mem.dupe(allocator, u8, ciphertext);
     defer allocator.free(cleartext);
 
     xor.repeating_xor_slice_in_place(cleartext, key);
 
-    std.debug.warn("cleartext: {}\n", .{cleartext});
+    std.log.info("cleartext: {}\n", .{cleartext});
 }

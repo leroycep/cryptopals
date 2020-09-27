@@ -1,5 +1,6 @@
 const std = @import("std");
 const xor = @import("./xor.zig");
+const set01 = @import("./set01.zig");
 const AES128 = std.crypto.core.aes.AES128;
 
 pub fn pkcs_padding(block: []u8, end_of_content: usize) void {
@@ -70,4 +71,142 @@ pub fn decrypt_aes128_cbc(allocator: *std.mem.Allocator, args_iter: *std.process
 
         prev_ciphertext_block = ciphertext[index..][0..AES_BLOCK_SIZE].*;
     }
+}
+
+const Mode = enum { ECB, CBC };
+const EncyptionOracleResult = struct {
+    encrypted_data: []u8,
+    mode: Mode,
+};
+
+pub fn encryption_oracle(allocator: *std.mem.Allocator, data: []const u8) !EncyptionOracleResult {
+    var buf: [8]u8 = undefined;
+    try std.crypto.randomBytes(&buf);
+    const seed = std.mem.readIntLittle(u64, buf[0..8]);
+
+    var prng = std.rand.DefaultCsprng.init(seed);
+    var rand = &prng.random;
+
+    // Geneate a random key
+    var key: [16]u8 = undefined;
+    for (key) |*key_byte| {
+        key_byte.* = rand.int(u8);
+    }
+    const aes = AES128.init(key);
+
+    const pre_bytes = rand.intRangeAtMost(usize, 5, 10);
+    const post_bytes = rand.intRangeAtMost(usize, 5, 10);
+
+    const padded_data_size = ((pre_bytes + data.len + post_bytes - 1) / AES_BLOCK_SIZE + 1) * AES_BLOCK_SIZE;
+
+    var padded_data = try allocator.alloc(u8, padded_data_size);
+    errdefer allocator.deinit(padded_data);
+
+    // Load all the data into the padded_data array
+    for (padded_data[0..pre_bytes]) |*pre_padding_byte| {
+        pre_padding_byte.* = rand.int(u8);
+    }
+    for (padded_data[pre_bytes .. pre_bytes + data.len]) |*padded_data_byte, idx| {
+        padded_data_byte.* = data[idx];
+    }
+    for (padded_data[pre_bytes + data.len .. pre_bytes + data.len + post_bytes]) |*post_padding_byte| {
+        post_padding_byte.* = rand.int(u8);
+    }
+    pkcs_padding(padded_data, pre_bytes + data.len + post_bytes);
+
+    var mode = if (rand.boolean()) Mode.ECB else Mode.CBC;
+
+    // Encrypt padded_data in place
+    switch (mode) {
+        .ECB => {
+            // Encrypt with ECB
+            var index: usize = 0;
+            while (index < padded_data.len) : (index += AES_BLOCK_SIZE) {
+                var ciphertext: [AES_BLOCK_SIZE]u8 = undefined;
+                aes.encrypt(&ciphertext, padded_data[index..]);
+                padded_data[index..][0..AES_BLOCK_SIZE].* = ciphertext;
+            }
+        },
+        .CBC => {
+            // Encrypt with CBC
+
+            // Generate a random initialization vector
+            var prev_ciphertext_block: [16]u8 = undefined;
+            for (prev_ciphertext_block) |*initialization_vector_byte| {
+                initialization_vector_byte.* = rand.int(u8);
+            }
+
+            var index: usize = 0;
+            while (index < padded_data.len) : (index += AES_BLOCK_SIZE) {
+                var ciphertext: [AES_BLOCK_SIZE]u8 = undefined;
+                aes.encrypt(&ciphertext, padded_data[index..]);
+                xor.xor_slice_in_place(&ciphertext, &prev_ciphertext_block);
+
+                padded_data[index..][0..AES_BLOCK_SIZE].* = ciphertext;
+
+                prev_ciphertext_block = ciphertext;
+            }
+        },
+    }
+
+    return EncyptionOracleResult{
+        .encrypted_data = padded_data,
+        .mode = mode,
+    };
+}
+
+// Can detect aes128 ECB if the plaintext repeated itself a lot
+pub fn detect_aes128_mode(allocator: *std.mem.Allocator, ciphertext: []const u8) !Mode {
+    var seen_blocks = std.AutoHashMap([AES_BLOCK_SIZE]u8, usize).init(allocator);
+    defer seen_blocks.deinit();
+
+    var max_repetition: usize = 0;
+    var num_repeats: usize = 0;
+    var num_blocks: usize = 0;
+
+    // Compare each block with each other
+    var index: usize = 0;
+    while (index < ciphertext.len) : (index += AES_BLOCK_SIZE) {
+        const block = ciphertext[index..][0..AES_BLOCK_SIZE];
+
+        const gop = try seen_blocks.getOrPut(block.*);
+        if (!gop.found_existing) {
+            gop.entry.value = 1;
+        } else {
+            gop.entry.value += 1;
+            num_repeats += 1;
+        }
+
+        max_repetition = std.math.max(gop.entry.value, max_repetition);
+        num_blocks += 1;
+    }
+
+    const per_1000_repetition = num_repeats * 1000 / num_blocks;
+
+    if (per_1000_repetition > 100) {
+        return .ECB;
+    } else {
+        return .CBC;
+    }
+}
+
+test "Detect mode of AES128 encryption" {
+    const allocator = std.testing.allocator;
+
+    const total_num_tests: usize = 1000;
+    var num_correct_guesses: usize = 0;
+    const example_data = "We all live in a YELLOW SUBMARINE" ** 32;
+
+    var num_tests: usize = 0;
+    while (num_tests < total_num_tests) : (num_tests += 1) {
+        const res = try encryption_oracle(allocator, example_data);
+        defer allocator.free(res.encrypted_data);
+
+        const mode_guess = try detect_aes128_mode(allocator, res.encrypted_data);
+        if (mode_guess == res.mode) {
+            num_correct_guesses += 1;
+        }
+    }
+
+    std.testing.expectEqual(total_num_tests, num_correct_guesses);
 }
