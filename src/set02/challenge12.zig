@@ -1,7 +1,8 @@
 const std = @import("std");
 const base64_decoder = std.base64.standard_decoder;
 const AES128 = std.crypto.core.aes.AES128;
-const pkcs_padding = @import("../set02.zig").pkcs_padding;
+const set02 = @import("../set02.zig");
+const pkcs_padding = set02.pkcs_padding;
 
 const AES_BLOCK_SIZE = 16;
 
@@ -76,8 +77,58 @@ pub fn decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std.pro
     log.info("Initializing black box", .{});
     const black_box = try ConsistentBlackBox.init();
 
-    const discovered_block_size = discover_block_size(allocator, black_box);
+    const discovered_block_size = try discover_block_size(allocator, black_box);
     log.info("Discovered block_size: {}", .{discovered_block_size});
+
+    const is_aes128_ecb = detect_aes128_ecb: {
+        const example_data = "We all live in a YELLOW SUBMARINE" ** 32;
+        const encrypted_data = try black_box.encrypt(allocator, example_data);
+        defer allocator.free(encrypted_data);
+
+        const mode_guess = try set02.detect_aes128_mode(allocator, encrypted_data);
+        break :detect_aes128_ecb mode_guess == .ECB;
+    };
+    std.debug.assert(is_aes128_ecb);
+    log.info("Detected AES128 ECB", .{});
+
+    const PADDING_BYTE = 'A';
+
+    // ciphertext with input data padded to be one short of the block size
+    const ciphertext_one_short = gen_ciphertexts: {
+        var input = try allocator.alloc(u8, discovered_block_size - 1);
+        defer allocator.free(input);
+        std.mem.set(u8, input, PADDING_BYTE);
+
+        break :gen_ciphertexts try black_box.encrypt(allocator, input);
+    };
+    defer allocator.free(ciphertext_one_short);
+
+    var discovered_plaintext = std.ArrayList(u8).init(allocator);
+    defer discovered_plaintext.deinit();
+
+    var last_byte_to_try: u8 = 0;
+    while (true) : (last_byte_to_try += 1) {
+        var input = try allocator.alloc(u8, discovered_block_size);
+        defer allocator.free(input);
+        std.mem.set(u8, input[0 .. discovered_block_size - 1], PADDING_BYTE);
+        input[discovered_block_size - 1] = last_byte_to_try;
+
+        const ciphertext = try black_box.encrypt(allocator, input);
+        defer allocator.free(ciphertext);
+
+        if (std.mem.eql(u8, ciphertext[0..discovered_block_size], ciphertext_one_short[0..discovered_block_size])) {
+            // We've figured out what the first byte is!
+            try discovered_plaintext.append(last_byte_to_try);
+            break;
+        }
+
+        if (last_byte_to_try == 255) {
+            log.warn("Could not discover byte!", .{});
+            break;
+        }
+    }
+
+    log.info("Discovered plaintext: {}", .{discovered_plaintext.items});
 }
 
 fn discover_block_size(allocator: *std.mem.Allocator, black_box: ConsistentBlackBox) !usize {
@@ -87,8 +138,8 @@ fn discover_block_size(allocator: *std.mem.Allocator, black_box: ConsistentBlack
     var input_size_to_try: usize = 1;
     while (input_size_to_try < 256) : (input_size_to_try += 1) {
         var input = try allocator.alloc(u8, input_size_to_try);
-        std.mem.set(u8, input, 'A');
         defer allocator.free(input);
+        std.mem.set(u8, input, 'A');
 
         const result = try black_box.encrypt(allocator, input);
         defer allocator.free(result);
