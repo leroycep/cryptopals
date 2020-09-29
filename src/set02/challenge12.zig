@@ -72,6 +72,7 @@ const ConsistentBlackBox = struct {
 };
 
 const log = std.log.scoped(.Challenge12);
+const PADDING_BYTE = 'A';
 
 pub fn decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std.process.ArgIterator) !void {
     log.info("Initializing black box", .{});
@@ -91,39 +92,15 @@ pub fn decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std.pro
     std.debug.assert(is_aes128_ecb);
     log.info("Detected AES128 ECB", .{});
 
-    const PADDING_BYTE = 'A';
-
-    // ciphertext with input data padded to be one short of the block size
-    const ciphertext_one_short = gen_ciphertexts: {
-        var input = try allocator.alloc(u8, discovered_block_size - 1);
-        defer allocator.free(input);
-        std.mem.set(u8, input, PADDING_BYTE);
-
-        break :gen_ciphertexts try black_box.encrypt(allocator, input);
-    };
-    defer allocator.free(ciphertext_one_short);
-
     var discovered_plaintext = std.ArrayList(u8).init(allocator);
     defer discovered_plaintext.deinit();
 
-    var last_byte_to_try: u8 = 0;
-    while (true) : (last_byte_to_try += 1) {
-        var input = try allocator.alloc(u8, discovered_block_size);
-        defer allocator.free(input);
-        std.mem.set(u8, input[0 .. discovered_block_size - 1], PADDING_BYTE);
-        input[discovered_block_size - 1] = last_byte_to_try;
-
-        const ciphertext = try black_box.encrypt(allocator, input);
-        defer allocator.free(ciphertext);
-
-        if (std.mem.eql(u8, ciphertext[0..discovered_block_size], ciphertext_one_short[0..discovered_block_size])) {
-            // We've figured out what the first byte is!
-            try discovered_plaintext.append(last_byte_to_try);
-            break;
-        }
-
-        if (last_byte_to_try == 255) {
-            log.warn("Could not discover byte!", .{});
+    var i: usize = 0;
+    while (i < discovered_block_size) : (i += 1) {
+        if (try discover_next_plaintext_byte(allocator, black_box, discovered_block_size, discovered_plaintext.items)) |plaintext_byte| {
+            try discovered_plaintext.append(plaintext_byte);
+        } else {
+            log.info("Could not discover next byte", .{});
             break;
         }
     }
@@ -150,4 +127,41 @@ fn discover_block_size(allocator: *std.mem.Allocator, black_box: ConsistentBlack
     }
 
     return error.CouldNotDetectBlockSize;
+}
+
+fn discover_next_plaintext_byte(allocator: *std.mem.Allocator, black_box: ConsistentBlackBox, discovered_block_size: usize, discovered_plaintext: []const u8) !?u8 {
+    if (discovered_plaintext.len > discovered_block_size) {
+        return error.TODO; // Make discover_next_plaintext_byte work for sizes > block size
+    }
+
+    // ciphertext with input data padded to be one short of the block size
+    const ciphertext_one_short = gen_ciphertexts: {
+        var input = try allocator.alloc(u8, discovered_block_size - 1 - discovered_plaintext.len);
+        defer allocator.free(input);
+        std.mem.set(u8, input, PADDING_BYTE);
+
+        break :gen_ciphertexts try black_box.encrypt(allocator, input);
+    };
+    defer allocator.free(ciphertext_one_short);
+
+    var last_byte_to_try: u8 = 0;
+    while (true) : (last_byte_to_try += 1) {
+        var input = try allocator.alloc(u8, discovered_block_size);
+        defer allocator.free(input);
+        std.mem.set(u8, input, PADDING_BYTE);
+        std.mem.copy(u8, input[discovered_block_size - 1 - discovered_plaintext.len ..], discovered_plaintext);
+        input[discovered_block_size - 1] = last_byte_to_try;
+
+        const ciphertext = try black_box.encrypt(allocator, input);
+        defer allocator.free(ciphertext);
+
+        if (std.mem.eql(u8, ciphertext[0..discovered_block_size], ciphertext_one_short[0..discovered_block_size])) {
+            // We've figured out what the first byte is!
+            return last_byte_to_try;
+        }
+
+        if (last_byte_to_try == 255) {
+            return null;
+        }
+    }
 }
