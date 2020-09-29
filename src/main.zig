@@ -7,9 +7,11 @@ const MAX_FILE_SIZE = 50 * 1000 * 1000;
 const CMD_DECRYPT_AES128_ECB = "decrypt-aes128-ecb";
 const CMD_DETECT_AES128_ECB = "detect-aes128-ecb";
 const CMD_DECRYPT_AES128_CBC = "decrypt-aes128-cbc";
+const CMD_CHALLENGE_12 = "challenge12";
 const HELP_LIST_SUBCOMMANDS = "  " ++ CMD_DECRYPT_AES128_ECB ++
     "\n  " ++ CMD_DETECT_AES128_ECB ++
     "\n  " ++ CMD_DECRYPT_AES128_ECB ++
+    "\n  " ++ CMD_CHALLENGE_12 ++
     "\n";
 
 pub fn main() !void {
@@ -33,6 +35,8 @@ pub fn main() !void {
         try detect_aes128_ebc(allocator, &args_iter);
     } else if (std.mem.eql(u8, CMD_DECRYPT_AES128_CBC, subcommand_str)) {
         try set02.decrypt_aes128_cbc(allocator, &args_iter);
+    } else if (std.mem.eql(u8, CMD_CHALLENGE_12, subcommand_str)) {
+        try set02.challenge12.decrypt_challenge_text(allocator, &args_iter);
     } else {
         std.debug.warn(
             \\Unknown subcommand "{}".
