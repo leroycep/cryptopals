@@ -95,8 +95,7 @@ pub fn decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std.pro
     var discovered_plaintext = std.ArrayList(u8).init(allocator);
     defer discovered_plaintext.deinit();
 
-    var i: usize = 0;
-    while (i < discovered_block_size) : (i += 1) {
+    while (true) {
         if (try discover_next_plaintext_byte(allocator, black_box, discovered_block_size, discovered_plaintext.items)) |plaintext_byte| {
             try discovered_plaintext.append(plaintext_byte);
         } else {
@@ -105,7 +104,7 @@ pub fn decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std.pro
         }
     }
 
-    log.info("Discovered plaintext: {}", .{discovered_plaintext.items});
+    log.info("Discovered plaintext:\n\n{}\n", .{discovered_plaintext.items});
 }
 
 fn discover_block_size(allocator: *std.mem.Allocator, black_box: ConsistentBlackBox) !usize {
@@ -130,13 +129,13 @@ fn discover_block_size(allocator: *std.mem.Allocator, black_box: ConsistentBlack
 }
 
 fn discover_next_plaintext_byte(allocator: *std.mem.Allocator, black_box: ConsistentBlackBox, discovered_block_size: usize, discovered_plaintext: []const u8) !?u8 {
-    if (discovered_plaintext.len > discovered_block_size) {
-        return error.TODO; // Make discover_next_plaintext_byte work for sizes > block size
-    }
+    const input_size = discovered_block_size - (discovered_plaintext.len % discovered_block_size) - 1;
+    // The block the next byte will be in
+    const idx_of_block = ((discovered_plaintext.len + input_size) / discovered_block_size) * discovered_block_size;
 
     // ciphertext with input data padded to be one short of the block size
     const ciphertext_one_short = gen_ciphertexts: {
-        var input = try allocator.alloc(u8, discovered_block_size - 1 - discovered_plaintext.len);
+        var input = try allocator.alloc(u8, input_size);
         defer allocator.free(input);
         std.mem.set(u8, input, PADDING_BYTE);
 
@@ -148,19 +147,26 @@ fn discover_next_plaintext_byte(allocator: *std.mem.Allocator, black_box: Consis
     while (true) : (last_byte_to_try += 1) {
         var input = try allocator.alloc(u8, discovered_block_size);
         defer allocator.free(input);
-        std.mem.set(u8, input, PADDING_BYTE);
-        std.mem.copy(u8, input[discovered_block_size - 1 - discovered_plaintext.len ..], discovered_plaintext);
+
+        if (discovered_plaintext.len < discovered_block_size) {
+            std.mem.set(u8, input, PADDING_BYTE);
+            std.mem.copy(u8, input[discovered_block_size - 1 - discovered_plaintext.len ..], discovered_plaintext);
+        } else {
+            const last_bytes_of_plaintext = discovered_plaintext[discovered_plaintext.len - (discovered_block_size - 1) ..];
+            std.mem.copy(u8, input, last_bytes_of_plaintext);
+        }
         input[discovered_block_size - 1] = last_byte_to_try;
 
         const ciphertext = try black_box.encrypt(allocator, input);
         defer allocator.free(ciphertext);
 
-        if (std.mem.eql(u8, ciphertext[0..discovered_block_size], ciphertext_one_short[0..discovered_block_size])) {
+        if (std.mem.eql(u8, ciphertext[0..discovered_block_size], ciphertext_one_short[idx_of_block..][0..discovered_block_size])) {
             // We've figured out what the first byte is!
             return last_byte_to_try;
         }
 
         if (last_byte_to_try == 255) {
+            log.debug("input_size: {}, idx_of_block: {}", .{ input_size, idx_of_block });
             return null;
         }
     }
