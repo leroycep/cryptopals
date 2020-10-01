@@ -134,4 +134,5 @@ pub fn detect_aes128_ebc(allocator: *std.mem.Allocator, args_iter: *std.process.
 test "_" {
     std.meta.refAllDecls(@import("./set01.zig"));
     std.meta.refAllDecls(@import("./set02.zig"));
+    std.meta.refAllDecls(@import("./set02/challenge13.zig"));
 }
