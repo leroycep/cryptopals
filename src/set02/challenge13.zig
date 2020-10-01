@@ -1,12 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const StringHashMap = std.StringHashMap;
-
-//
-//
 // PARSE URL OPTS
 //
-// 
+//
 
 /// Parse url KV options. Allocates a hashmap and copies the strings for the
 /// key and value.
@@ -86,3 +83,27 @@ test "Parsing url options" {
     std.testing.expectEqualSlices(u8, "zazzle", url_options2.get("zap").?);
 }
 
+//                    URL OPTION PROFILE FOR
+
+pub fn profile_for(allocator: *Allocator, email: []const u8) ![]u8 {
+    // Check if for any invalid characters
+    if (std.mem.indexOfAny(u8, email, "&=")) |_pos_of_invalid_character| {
+        return error.InvalidCharacter;
+    }
+
+    return std.fmt.allocPrint(allocator, "email={}&uid=10&role=user", .{email});
+}
+
+test "Encoding user profile" {
+    const alloc = std.testing.allocator;
+
+    const s = try profile_for(alloc, "hello@example.com");
+    defer alloc.free(s);
+
+    std.testing.expectEqualSlices(u8, "email=hello@example.com&uid=10&role=user", s);
+}
+
+test "Encoding user profile with invalid characters" {
+    const alloc = std.testing.allocator;
+    std.testing.expectError(error.InvalidCharacter, profile_for(alloc, "foo@bar.com&role=admin"));
+}
