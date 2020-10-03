@@ -4,6 +4,7 @@ const set01 = @import("./set01.zig");
 const AES128 = std.crypto.core.aes.AES128;
 
 pub const challenge12 = @import("./set02/challenge12.zig");
+pub const challenge13 = @import("./set02/challenge13.zig");
 
 pub fn pkcs_padding(block: []u8, end_of_content: usize) void {
     std.debug.assert(end_of_content <= block.len);

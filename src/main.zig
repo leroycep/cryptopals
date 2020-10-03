@@ -8,10 +8,12 @@ const CMD_DECRYPT_AES128_ECB = "decrypt-aes128-ecb";
 const CMD_DETECT_AES128_ECB = "detect-aes128-ecb";
 const CMD_DECRYPT_AES128_CBC = "decrypt-aes128-cbc";
 const CMD_CHALLENGE_12 = "challenge12";
+const CMD_PROFILE_FOR = "profile-for";
 const HELP_LIST_SUBCOMMANDS = "  " ++ CMD_DECRYPT_AES128_ECB ++
     "\n  " ++ CMD_DETECT_AES128_ECB ++
     "\n  " ++ CMD_DECRYPT_AES128_ECB ++
     "\n  " ++ CMD_CHALLENGE_12 ++
+    "\n  " ++ CMD_PROFILE_FOR ++
     "\n";
 
 pub fn main() !void {
@@ -37,6 +39,8 @@ pub fn main() !void {
         try set02.decrypt_aes128_cbc(allocator, &args_iter);
     } else if (std.mem.eql(u8, CMD_CHALLENGE_12, subcommand_str)) {
         try set02.challenge12.decrypt_challenge_text(allocator, &args_iter);
+    } else if (std.mem.eql(u8, CMD_PROFILE_FOR, subcommand_str)) {
+        try set02.challenge13.cmd_profile_for(allocator, &args_iter);
     } else {
         std.debug.warn(
             \\Unknown subcommand "{}".
@@ -134,5 +138,4 @@ pub fn detect_aes128_ebc(allocator: *std.mem.Allocator, args_iter: *std.process.
 test "_" {
     std.meta.refAllDecls(@import("./set01.zig"));
     std.meta.refAllDecls(@import("./set02.zig"));
-    std.meta.refAllDecls(@import("./set02/challenge13.zig"));
 }

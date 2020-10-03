@@ -1,9 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const StringHashMap = std.StringHashMap;
+const set02 = @import("../set02.zig");
+const pkcs_padding = set02.pkcs_padding;
+const AES128 = std.crypto.core.aes.AES128;
+const AES_BLOCK_SIZE = @import("../constants.zig").AES_BLOCK_SIZE;
+
 // PARSE URL OPTS
-//
-//
 
 /// Parse url KV options. Allocates a hashmap and copies the strings for the
 /// key and value.
@@ -106,4 +109,80 @@ test "Encoding user profile" {
 test "Encoding user profile with invalid characters" {
     const alloc = std.testing.allocator;
     std.testing.expectError(error.InvalidCharacter, profile_for(alloc, "foo@bar.com&role=admin"));
+}
+
+const UserProfileEncryptor = struct {
+    aes: std.crypto.core.aes.AES128,
+
+    const UserProfile = struct {
+        allocator: *Allocator,
+        uid: u32,
+        email: []u8,
+        role: []u8,
+
+        pub fn deinit(this: *@This()) void {
+            this.allocator.free(email);
+            this.allocator.free(role);
+        }
+    };
+
+    pub fn init() !@This() {
+        var buf: [8]u8 = undefined;
+        try std.crypto.randomBytes(&buf);
+        const seed = std.mem.readIntLittle(u64, buf[0..8]);
+
+        var prng = std.rand.DefaultCsprng.init(seed);
+        var rand = &prng.random;
+
+        var key: [16]u8 = undefined;
+        for (key) |*key_byte| {
+            key_byte.* = rand.int(u8);
+        }
+
+        return @This(){
+            .aes = AES128.init(key),
+        };
+    }
+
+    pub fn encoded_profile_for(this: @This(), allocator: *std.mem.Allocator, email: []const u8) ![]u8 {
+        var plaintext = try profile_for(allocator, email);
+
+        // Resize allocation so that it is an even multiple of AES_BLOCK_SIZE
+        const full_data_size = ((plaintext.len - 1) / AES_BLOCK_SIZE + 1) * AES_BLOCK_SIZE;
+        plaintext = try allocator.realloc(plaintext, full_data_size);
+
+        // Set the extra bytes used to make it fit to AES_BLOCK_SIZE with PKCS padding
+        pkcs_padding(plaintext, plaintext.len);
+
+        var index: usize = 0;
+        while (index < plaintext.len) : (index += AES_BLOCK_SIZE) {
+            // Encrypt a block of data
+            var ciphertext: [AES_BLOCK_SIZE]u8 = undefined;
+            this.aes.encrypt(&ciphertext, plaintext[index..]);
+
+            // Copy encrypted data over plaintext
+            plaintext[index..][0..AES_BLOCK_SIZE].* = ciphertext;
+        }
+
+        return plaintext;
+    }
+};
+
+//   Create `role=admin` user profile as attacker
+
+const log = std.log.scoped(.challenge13);
+
+pub fn cmd_profile_for(allocator: *std.mem.Allocator, args_iter: *std.process.ArgIterator) !void {
+    const email = try args_iter.next(allocator) orelse {
+        std.debug.warn("Pass in an email to make the profile string for\n", .{});
+        return;
+    };
+    defer allocator.free(email);
+
+    const user_profile_encryptor = try UserProfileEncryptor.init();
+
+    const encoded_profile = try user_profile_encryptor.encoded_profile_for(allocator, email);
+    defer allocator.free(encoded_profile);
+
+    log.info("encoded profile for {}: {x}", .{email, encoded_profile});
 }

@@ -3,8 +3,8 @@ const base64_decoder = std.base64.standard_decoder;
 const AES128 = std.crypto.core.aes.AES128;
 const set02 = @import("../set02.zig");
 const pkcs_padding = set02.pkcs_padding;
+const AES_BLOCK_SIZE = @import("../constants.zig").AES_BLOCK_SIZE;
 
-const AES_BLOCK_SIZE = 16;
 
 const CHALLENGE_TEXT_BASE64 = @embedFile("./challenge12-text.base64");
 const CHALLENGE_TEXT = comptime decode_text: {
