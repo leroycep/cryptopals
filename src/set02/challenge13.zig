@@ -118,8 +118,8 @@ const UserProfileEncryptor = struct {
         role: []u8,
 
         pub fn deinit(this: *@This()) void {
-            this.allocator.free(email);
-            this.allocator.free(role);
+            this.allocator.free(this.email);
+            this.allocator.free(this.role);
         }
     };
 
@@ -164,13 +164,13 @@ const UserProfileEncryptor = struct {
         return plaintext;
     }
 
-    pub fn decode_profile_for(this: @This(), allocator: *Allocator, ciphertext: []const u8) ![]u8 {
+    pub fn decode_profile_for(this: @This(), allocator: *Allocator, ciphertext: []const u8) !UserProfile {
         if (ciphertext.len % AES_BLOCK_SIZE != 0 or ciphertext.len == 0) {
             return error.InvalidFormat; // Must be the correct size
         }
 
         var plaintext = try allocator.alloc(u8, ciphertext.len);
-        errdefer allocator.free(plaintext);
+        defer allocator.free(plaintext);
 
         // Decrypt data
         var index: usize = 0;
@@ -194,7 +194,23 @@ const UserProfileEncryptor = struct {
 
         plaintext = try allocator.realloc(plaintext, len_without_pkcs);
 
-        return plaintext;
+        var url_opts = try parse_url_opts(allocator, plaintext);
+        defer url_opts.deinit();
+
+        const uid_str = url_opts.values.get("uid") orelse return error.InvalidFormat;
+        const email_entry = url_opts.values.remove("email") orelse return error.InvalidFormat;
+        const role_entry = url_opts.values.remove("role") orelse return error.InvalidFormat;
+
+        const uid = std.fmt.parseInt(u32, uid_str, 10) catch return error.InvalidFormat;
+
+        const user_profile = UserProfile{
+            .allocator = allocator,
+            .uid = uid,
+            .email = email_entry.value,
+            .role = role_entry.value,
+        };
+
+        return user_profile;
     }
 };
 
@@ -216,8 +232,8 @@ pub fn cmd_profile_for(allocator: *std.mem.Allocator, args_iter: *std.process.Ar
 
     log.info("encoded profile for {}: {x}", .{ email, encoded_profile });
 
-    const decoded_profile = try user_profile_encryptor.decode_profile_for(allocator, encoded_profile);
-    defer allocator.free(decoded_profile);
+    var decoded_profile = try user_profile_encryptor.decode_profile_for(allocator, encoded_profile);
+    defer decoded_profile.deinit();
 
-    log.info("decoded profile for: {}", .{decoded_profile});
+    log.info("{{\n\t email: {}\n\t role: {}\n\t uid: {}\n}}", .{ decoded_profile.email, decoded_profile.role, decoded_profile.uid });
 }
