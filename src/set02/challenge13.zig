@@ -166,6 +166,39 @@ const UserProfileEncryptor = struct {
 
         return plaintext;
     }
+
+    pub fn decode_profile_for(this: @This(), allocator: *Allocator, ciphertext: []const u8) ![]u8 {
+        if (ciphertext.len % AES_BLOCK_SIZE != 0 or ciphertext.len == 0) {
+            return error.InvalidFormat; // Must be the correct size
+        }
+
+        var plaintext = try allocator.alloc(u8, ciphertext.len);
+        errdefer allocator.free(plaintext);
+
+        // Decrypt data
+        var index: usize = 0;
+        while (index < plaintext.len) : (index += AES_BLOCK_SIZE) {
+            // Decrypt a block of data
+            this.aes.decrypt(plaintext[index..], ciphertext[index..]);
+        }
+
+        const last_byte = plaintext[plaintext.len - 1];
+        var len_without_pkcs = plaintext.len;
+
+        if (last_byte < AES_BLOCK_SIZE) check_bytes: {
+            var maybe_start_of_pkcs = plaintext.len - 1 - @intCast(usize, last_byte);
+            for (plaintext[maybe_start_of_pkcs..]) |byte| {
+                if (byte != last_byte) {
+                    break :check_bytes;
+                }
+            }
+            len_without_pkcs = plaintext.len - @intCast(usize, last_byte);
+        }
+
+        plaintext = try allocator.realloc(plaintext, len_without_pkcs);
+
+        return plaintext;
+    }
 };
 
 //   Create `role=admin` user profile as attacker
@@ -184,5 +217,10 @@ pub fn cmd_profile_for(allocator: *std.mem.Allocator, args_iter: *std.process.Ar
     const encoded_profile = try user_profile_encryptor.encoded_profile_for(allocator, email);
     defer allocator.free(encoded_profile);
 
-    log.info("encoded profile for {}: {x}", .{email, encoded_profile});
+    log.info("encoded profile for {}: {x}", .{ email, encoded_profile });
+
+    const decoded_profile = try user_profile_encryptor.decode_profile_for(allocator, encoded_profile);
+    defer allocator.free(decoded_profile);
+
+    log.info("decoded profile for: {}", .{decoded_profile});
 }
