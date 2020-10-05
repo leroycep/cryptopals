@@ -183,8 +183,9 @@ const UserProfileEncryptor = struct {
         var len_without_pkcs = plaintext.len;
 
         if (last_byte < AES_BLOCK_SIZE) check_bytes: {
-            var maybe_start_of_pkcs = plaintext.len - 1 - @intCast(usize, last_byte);
-            for (plaintext[maybe_start_of_pkcs..]) |byte| {
+            std.debug.assert(plaintext[plaintext.len - AES_BLOCK_SIZE..].len == AES_BLOCK_SIZE);
+            var maybe_start_of_pkcs = plaintext.len - @intCast(usize, last_byte);
+            for (plaintext[maybe_start_of_pkcs..]) |byte, idx| {
                 if (byte != last_byte) {
                     break :check_bytes;
                 }
@@ -193,6 +194,8 @@ const UserProfileEncryptor = struct {
         }
 
         plaintext = try allocator.realloc(plaintext, len_without_pkcs);
+
+        log.info("plaintext: {}", .{plaintext});
 
         var url_opts = try parse_url_opts(allocator, plaintext);
         defer url_opts.deinit();
@@ -236,4 +239,38 @@ pub fn cmd_profile_for(allocator: *std.mem.Allocator, args_iter: *std.process.Ar
     defer decoded_profile.deinit();
 
     log.info("{{\n\t email: {}\n\t role: {}\n\t uid: {}\n}}", .{ decoded_profile.email, decoded_profile.role, decoded_profile.uid });
+}
+
+pub fn cmd_admin_profile_attack(allocator: *Allocator, args_iter: *std.process.ArgIterator) !void {
+    const user_profile_encryptor = try UserProfileEncryptor.init();
+
+    const admin_role_ciphertext = get_admin_ciphertext: {
+        const ADMIN_ROLE_EMAIL = "foo@ba.comadmin\x0B\x0B\x0B\x0B\x0B\x0B\x0B\x0B\x0B\x0B\x0B";
+        std.debug.assert((ADMIN_ROLE_EMAIL.len + "email=".len) % AES_BLOCK_SIZE == 0);
+        std.debug.assert((ADMIN_ROLE_EMAIL.len + "email=".len) / AES_BLOCK_SIZE == 2);
+
+        const encoded_profile = try user_profile_encryptor.encoded_profile_for(allocator, ADMIN_ROLE_EMAIL);
+        defer allocator.free(encoded_profile);
+        std.debug.assert(encoded_profile.len % AES_BLOCK_SIZE == 0);
+        //log.warn("num blocks = {}\n", .{encoded_profile.len / AES_BLOCK_SIZE});
+        //std.debug.assert(encoded_profile.len / AES_BLOCK_SIZE == 3);
+
+        break :get_admin_ciphertext @as([AES_BLOCK_SIZE]u8, encoded_profile[1 * AES_BLOCK_SIZE ..][0..AES_BLOCK_SIZE].*);
+    };
+    log.info("admin ciphertext: {x}", .{admin_role_ciphertext});
+
+    // Create a carefully sized email that will put the role text in a place we can swap it
+    const EMAIL = "foo12@bar.com";
+    var encoded_profile = try user_profile_encryptor.encoded_profile_for(allocator, EMAIL);
+    defer allocator.free(encoded_profile);
+
+    // Change the role an admin role
+    encoded_profile[encoded_profile.len - AES_BLOCK_SIZE ..][0..AES_BLOCK_SIZE].* = admin_role_ciphertext;
+
+    var decoded_profile = try user_profile_encryptor.decode_profile_for(allocator, encoded_profile);
+    defer decoded_profile.deinit();
+
+    log.info("{{\n\t email: {}\n\t role: {}\n\t uid: {}\n}}", .{ decoded_profile.email, decoded_profile.role, decoded_profile.uid });
+
+    std.debug.assert(std.mem.eql(u8, "admin", decoded_profile.role));
 }

@@ -21,6 +21,13 @@ test "PKCS#7 padding" {
     pkcs_padding(&block, 16);
 
     std.testing.expectEqualSlices(u8, "YELLOW SUBMARINE\x04\x04\x04\x04", &block);
+    
+    var block2: [16]u8 = undefined;
+    block2[0..5].* = "admin".*;
+
+    pkcs_padding(&block2, 5);
+
+    std.testing.expectEqualSlices(u8, "admin\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b", &block2);
 }
 
 const MAX_FILE_SIZE = 50 * 1000 * 1000;

@@ -70,6 +70,10 @@ const COMMANDS = [_]Command{
         .name = "profile-for",
         .func = set02.challenge13.cmd_profile_for,
     },
+    .{
+        .name = "admin-profile-attack",
+        .func = set02.challenge13.cmd_admin_profile_attack,
+    },
 };
 
 pub fn decrypt_aes128_ebc(allocator: *std.mem.Allocator, args_iter: *std.process.ArgIterator) !void {
