@@ -1,20 +1,10 @@
 const std = @import("std");
 const set02 = @import("./set02.zig");
 const AES128 = std.crypto.core.aes.AES128;
+const Allocator = std.mem.Allocator;
+const ArgIterator = std.process.ArgIterator;
 
 const MAX_FILE_SIZE = 50 * 1000 * 1000;
-
-const CMD_DECRYPT_AES128_ECB = "decrypt-aes128-ecb";
-const CMD_DETECT_AES128_ECB = "detect-aes128-ecb";
-const CMD_DECRYPT_AES128_CBC = "decrypt-aes128-cbc";
-const CMD_CHALLENGE_12 = "challenge12";
-const CMD_PROFILE_FOR = "profile-for";
-const HELP_LIST_SUBCOMMANDS = "  " ++ CMD_DECRYPT_AES128_ECB ++
-    "\n  " ++ CMD_DETECT_AES128_ECB ++
-    "\n  " ++ CMD_DECRYPT_AES128_ECB ++
-    "\n  " ++ CMD_CHALLENGE_12 ++
-    "\n  " ++ CMD_PROFILE_FOR ++
-    "\n";
 
 pub fn main() !void {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -26,30 +16,61 @@ pub fn main() !void {
     std.debug.assert(args_iter.skip());
 
     const subcommand_str = try args_iter.next(allocator) orelse {
-        std.debug.warn("Subcommands:\n{}", .{HELP_LIST_SUBCOMMANDS});
+        std.debug.warn("Subcommands:\n", .{});
+        list_subcommands();
         return;
     };
     defer allocator.free(subcommand_str);
 
-    if (std.mem.eql(u8, CMD_DECRYPT_AES128_ECB, subcommand_str)) {
-        try decrypt_aes128_ebc(allocator, &args_iter);
-    } else if (std.mem.eql(u8, CMD_DETECT_AES128_ECB, subcommand_str)) {
-        try detect_aes128_ebc(allocator, &args_iter);
-    } else if (std.mem.eql(u8, CMD_DECRYPT_AES128_CBC, subcommand_str)) {
-        try set02.decrypt_aes128_cbc(allocator, &args_iter);
-    } else if (std.mem.eql(u8, CMD_CHALLENGE_12, subcommand_str)) {
-        try set02.challenge12.decrypt_challenge_text(allocator, &args_iter);
-    } else if (std.mem.eql(u8, CMD_PROFILE_FOR, subcommand_str)) {
-        try set02.challenge13.cmd_profile_for(allocator, &args_iter);
+    inline for (COMMANDS) |command| {
+        if (std.mem.eql(u8, command.name, subcommand_str)) {
+            try command.func(allocator, &args_iter);
+            break;
+        }
     } else {
         std.debug.warn(
             \\Unknown subcommand "{}".
             \\
             \\Possible subcommands:
-            \\{}
-        , .{ subcommand_str, HELP_LIST_SUBCOMMANDS });
+            \\
+        , .{subcommand_str});
+        list_subcommands();
     }
 }
+
+pub fn list_subcommands() void {
+    for (COMMANDS) |command| {
+        std.debug.warn("  {}\n", .{command.name});
+    }
+}
+
+const Command = struct {
+    name: []const u8,
+    func: fn (*Allocator, *ArgIterator) anyerror!void,
+};
+
+const COMMANDS = [_]Command{
+    .{
+        .name = "decrypt-aes128-ecb",
+        .func = decrypt_aes128_ebc,
+    },
+    .{
+        .name = "detect-aes128-ecb",
+        .func = detect_aes128_ebc,
+    },
+    .{
+        .name = "decrypt-aes128-cbc",
+        .func = set02.decrypt_aes128_cbc,
+    },
+    .{
+        .name = "challenge12",
+        .func = set02.challenge12.decrypt_challenge_text,
+    },
+    .{
+        .name = "profile-for",
+        .func = set02.challenge13.cmd_profile_for,
+    },
+};
 
 pub fn decrypt_aes128_ebc(allocator: *std.mem.Allocator, args_iter: *std.process.ArgIterator) !void {
     const filepath = try args_iter.next(allocator) orelse {
