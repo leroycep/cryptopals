@@ -1,25 +1,22 @@
 const std = @import("std");
-const base64_decoder = std.base64.standard_decoder;
-const AES128 = std.crypto.core.aes.AES128;
+const Allocator = std.mem.Allocator;
 const set02 = @import("../set02.zig");
+const challenge12 = set02.challenge12;
+const AES128 = std.crypto.core.aes.AES128;
 const pkcs_padding = set02.pkcs_padding;
 const AES_BLOCK_SIZE = @import("../constants.zig").AES_BLOCK_SIZE;
 
-
-const CHALLENGE_TEXT_BASE64 = @embedFile("./challenge12-text.base64");
-pub const CHALLENGE_TEXT = comptime decode_text: {
-    const trimmed_text = std.mem.trim(u8, CHALLENGE_TEXT_BASE64, " \n");
-    const size = base64_decoder.calcSize(trimmed_text) catch unreachable;
-    comptime var text: [size]u8 = undefined;
-    base64_decoder.decode(&text, trimmed_text) catch unreachable;
-    break :decode_text text;
-};
+const log = std.log.scoped(.challenge14);
 
 const ConsistentBlackBox = struct {
+    allocator: *Allocator,
     aes: std.crypto.core.aes.AES128,
-    text_to_append: []const u8,
+    text_to_prepend: []u8,
+    text_to_append: []u8,
 
-    pub fn init() !@This() {
+    const MAX_PREFIX_LENGTH = 4096;
+
+    pub fn init(allocator: *Allocator) !@This() {
         var buf: [8]u8 = undefined;
         try std.crypto.randomBytes(&buf);
         const seed = std.mem.readIntLittle(u64, buf[0..8]);
@@ -28,34 +25,53 @@ const ConsistentBlackBox = struct {
         var rand = &prng.random;
 
         var key: [16]u8 = undefined;
-        for (key) |*key_byte| {
-            key_byte.* = rand.int(u8);
-        }
+        rand.bytes(&key);
+
+        const random_prefix_len = rand.int(usize) % MAX_PREFIX_LENGTH;
+        const random_prefix = try allocator.alloc(u8, random_prefix_len);
+        rand.bytes(random_prefix);
 
         return @This(){
+            .allocator = allocator,
             .aes = AES128.init(key),
-            .text_to_append = &CHALLENGE_TEXT,
+            .text_to_append = try std.mem.dupe(allocator, u8, &challenge12.CHALLENGE_TEXT),
+            .text_to_prepend = random_prefix,
         };
+    }
+
+    pub fn deinit(this: @This()) void {
+        this.allocator.free(this.text_to_prepend);
+        this.allocator.free(this.text_to_append);
     }
 
     pub fn encrypt(this: @This(), allocator: *std.mem.Allocator, data: []const u8) ![]u8 {
         // The size of data with the appended text and then sized up to fit the
         // AES block size exactly
-        const full_data_size = ((data.len + this.text_to_append.len - 1) / AES_BLOCK_SIZE + 1) * AES_BLOCK_SIZE;
+        const full_data_size = calc_size: {
+            var size: usize = 0;
+            size += this.text_to_prepend.len;
+            size += data.len;
+            size += this.text_to_append.len;
+
+            // Align to number of blocks
+            size -= 1;
+            size /= AES_BLOCK_SIZE;
+
+            size += 1;
+            size *= AES_BLOCK_SIZE;
+
+            break :calc_size size;
+        };
+
         var full_data = try allocator.alloc(u8, full_data_size);
         errdefer allocator.deinit(full_data);
 
         // Copy data to full_data array
-        for (full_data[0..data.len]) |*full_data_byte, data_idx| {
-            full_data_byte.* = data[data_idx];
-        }
+        std.mem.copy(u8, full_data[0..], this.text_to_prepend);
+        std.mem.copy(u8, full_data[this.text_to_prepend.len..], data);
+        std.mem.copy(u8, full_data[this.text_to_prepend.len + data.len ..], this.text_to_append);
 
-        // Append challenge text to the end of the full_data array
-        for (full_data[data.len .. data.len + this.text_to_append.len]) |*full_data_byte, text_to_append_idx| {
-            full_data_byte.* = this.text_to_append[text_to_append_idx];
-        }
-
-        pkcs_padding(full_data, data.len + this.text_to_append.len);
+        pkcs_padding(full_data, this.text_to_prepend.len + data.len + this.text_to_append.len);
 
         var index: usize = 0;
         while (index < full_data.len) : (index += AES_BLOCK_SIZE) {
@@ -71,12 +87,10 @@ const ConsistentBlackBox = struct {
     }
 };
 
-const log = std.log.scoped(.Challenge12);
-const PADDING_BYTE = 'A';
-
-pub fn decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std.process.ArgIterator) !void {
+pub fn cmd_decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std.process.ArgIterator) !void {
     log.info("Initializing black box", .{});
-    const black_box = try ConsistentBlackBox.init();
+    const black_box = try ConsistentBlackBox.init(allocator);
+    defer black_box.deinit();
 
     const discovered_block_size = try discover_block_size(allocator, black_box);
     log.info("Discovered block_size: {}", .{discovered_block_size});
@@ -127,6 +141,8 @@ fn discover_block_size(allocator: *std.mem.Allocator, black_box: ConsistentBlack
 
     return error.CouldNotDetectBlockSize;
 }
+
+const PADDING_BYTE = 'A';
 
 fn discover_next_plaintext_byte(allocator: *std.mem.Allocator, black_box: ConsistentBlackBox, discovered_block_size: usize, discovered_plaintext: []const u8) !?u8 {
     const input_size = discovered_block_size - (discovered_plaintext.len % discovered_block_size) - 1;
