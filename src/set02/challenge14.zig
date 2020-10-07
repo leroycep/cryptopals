@@ -87,17 +87,22 @@ const ConsistentBlackBox = struct {
     }
 };
 
-pub fn cmd_decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std.process.ArgIterator) !void {
+pub fn cmd_decrypt_challenge_text(allocator: *Allocator, args_iter: *std.process.ArgIterator) !void {
     log.info("Initializing black box", .{});
     const black_box = try ConsistentBlackBox.init(allocator);
     defer black_box.deinit();
+
+    log.info("Hidden variables: prefix len {}, postfix len {}", .{ black_box.text_to_prepend.len, black_box.text_to_append.len });
 
     const discovered_block_size = try discover_block_size(allocator, black_box);
     log.info("Discovered block_size: {}", .{discovered_block_size});
 
     const is_aes128_ecb = detect_aes128_ecb: {
-        const example_data = "We all live in a YELLOW SUBMARINE" ** 32;
-        const encrypted_data = try black_box.encrypt(allocator, example_data);
+        var input = try allocator.alloc(u8, discovered_block_size * 32);
+        defer allocator.free(input);
+        std.mem.set(u8, input, PADDING_BYTE);
+
+        const encrypted_data = try black_box.encrypt(allocator, input);
         defer allocator.free(encrypted_data);
 
         const mode_guess = try set02.detect_aes128_mode(allocator, encrypted_data);
@@ -105,6 +110,9 @@ pub fn cmd_decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std
     };
     std.debug.assert(is_aes128_ecb);
     log.info("Detected AES128 ECB", .{});
+
+    const discovered_prefix_len = try discover_prefix_length(allocator, black_box, discovered_block_size);
+    log.info("Discovered secrets length: {}", .{discovered_prefix_len});
 
     var discovered_plaintext = std.ArrayList(u8).init(allocator);
     defer discovered_plaintext.deinit();
@@ -121,7 +129,7 @@ pub fn cmd_decrypt_challenge_text(allocator: *std.mem.Allocator, args_iter: *std
     log.info("Discovered plaintext:\n\n{}\n", .{discovered_plaintext.items});
 }
 
-fn discover_block_size(allocator: *std.mem.Allocator, black_box: ConsistentBlackBox) !usize {
+fn discover_block_size(allocator: *Allocator, black_box: ConsistentBlackBox) !usize {
     const empty_input_result = try black_box.encrypt(allocator, "");
     defer allocator.free(empty_input_result);
 
@@ -142,9 +150,81 @@ fn discover_block_size(allocator: *std.mem.Allocator, black_box: ConsistentBlack
     return error.CouldNotDetectBlockSize;
 }
 
-const PADDING_BYTE = 'A';
+pub fn block(block_idx: usize, array: []const u8) [AES_BLOCK_SIZE]u8 {
+    // TODO: Make this work for variable block sizes
+    return array[block_idx * AES_BLOCK_SIZE ..][0..AES_BLOCK_SIZE].*;
+}
 
-fn discover_next_plaintext_byte(allocator: *std.mem.Allocator, black_box: ConsistentBlackBox, discovered_block_size: usize, discovered_plaintext: []const u8) !?u8 {
+pub fn num_blocks(array: []const u8) usize {
+    if (array.len == 0) {
+        return 0;
+    }
+    return (array.len - 1) / AES_BLOCK_SIZE + 1;
+}
+
+fn discover_prefix_length(allocator: *Allocator, black_box: ConsistentBlackBox, block_size: usize) !usize {
+    const pad_size = 3 * block_size;
+
+    const negative_padding_result = negative_padding: {
+        var input = try allocator.alloc(u8, pad_size);
+        defer allocator.free(input);
+        std.mem.set(u8, input, ~@as(u8, PADDING_BYTE));
+
+        break :negative_padding try black_box.encrypt(allocator, input);
+    };
+    defer allocator.free(negative_padding_result);
+
+    const padded_input_result = offset_padded: {
+        var input = try allocator.alloc(u8, pad_size);
+        defer allocator.free(input);
+        std.mem.set(u8, input, PADDING_BYTE);
+
+        break :offset_padded try black_box.encrypt(allocator, input);
+    };
+    defer allocator.free(padded_input_result);
+
+    //var prev_block: [AES_BLOCK_SIZE]u8 = block(0, aligned_duplicates_filler_result);
+    // Find where the data starts
+    var last_block_of_prefix: usize = 0;
+    while (true) : (last_block_of_prefix += 1) {
+        if (last_block_of_prefix >= num_blocks(negative_padding_result)) {
+            return error.CouldNotDetectData;
+        }
+
+        const negative_block = block(last_block_of_prefix, negative_padding_result);
+        const padded_block = block(last_block_of_prefix, padded_input_result);
+
+        if (!std.meta.eql(negative_block, padded_block)) {
+            log.debug("non matching: {}\t{x}\t{x}", .{ last_block_of_prefix, negative_block, padded_block });
+            break;
+        }
+    }
+
+    const padded_block = block(last_block_of_prefix, padded_input_result);
+
+    // Keep trying new lengths until we find a length that matches padded block
+    var input_size: usize = 0;
+    while (input_size <= block_size) : (input_size += 1) {
+        var input = try allocator.alloc(u8, input_size);
+        defer allocator.free(input);
+        std.mem.set(u8, input, PADDING_BYTE);
+
+        const result = try black_box.encrypt(allocator, input);
+        defer allocator.free(result);
+
+        const new_block = block(last_block_of_prefix, result);
+
+        if (std.meta.eql(new_block, padded_block)) {
+            return (block_size - input_size) + last_block_of_prefix * block_size;
+        }
+    }
+
+    return error.CouldNotDetectSecretsSize;
+}
+
+const PADDING_BYTE = 0xFF;
+
+fn discover_next_plaintext_byte(allocator: *Allocator, black_box: ConsistentBlackBox, discovered_block_size: usize, discovered_plaintext: []const u8) !?u8 {
     const input_size = discovered_block_size - (discovered_plaintext.len % discovered_block_size) - 1;
     // The block the next byte will be in
     const idx_of_block = ((discovered_plaintext.len + input_size) / discovered_block_size) * discovered_block_size;
