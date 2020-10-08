@@ -129,7 +129,7 @@ pub fn cmd_decrypt_challenge_text(allocator: *Allocator, args_iter: *std.process
     log.info("Discovered plaintext:\n\n{}\n", .{discovered_plaintext.items});
 
     log.info("Discovered plaintext len: {}", .{discovered_plaintext.items.len});
-    std.debug.assert(discovered_plaintext.items.len == black_box.text_to_append.len);
+    std.debug.assert(discovered_plaintext.items.len == black_box.text_to_append.len); // Fails because PKCS padding isn't removed
 }
 
 fn discover_block_size(allocator: *Allocator, black_box: ConsistentBlackBox) !usize {

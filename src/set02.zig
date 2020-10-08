@@ -22,13 +22,35 @@ test "PKCS#7 padding" {
     pkcs_padding(&block, 16);
 
     std.testing.expectEqualSlices(u8, "YELLOW SUBMARINE\x04\x04\x04\x04", &block);
-    
+
     var block2: [16]u8 = undefined;
     block2[0..5].* = "admin".*;
 
     pkcs_padding(&block2, 5);
 
     std.testing.expectEqualSlices(u8, "admin\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b", &block2);
+}
+
+pub fn strip_pkcs_padding(plaintext: []const u8, block_size: usize) ![]const u8 {
+    const last_byte = plaintext[plaintext.len - 1];
+
+    if (last_byte < block_size) {
+        var maybe_start_of_pkcs = plaintext.len - @intCast(usize, last_byte);
+        for (plaintext[maybe_start_of_pkcs..]) |byte| {
+            if (byte != last_byte) {
+                return error.InvalidPadding;
+            }
+        }
+        const len_without_pkcs = plaintext.len - @intCast(usize, last_byte);
+        return plaintext[0..len_without_pkcs];
+    }
+    return error.InvalidPadding;
+}
+
+test "strip PKCS#7 padding" {
+    std.testing.expectEqualSlices(u8, "ICE ICE BABY", try strip_pkcs_padding("ICE ICE BABY\x04\x04\x04\x04", AES_BLOCK_SIZE));
+    std.testing.expectError(error.InvalidPadding, strip_pkcs_padding("ICE ICE BABY\x05\x05\x05\x05", AES_BLOCK_SIZE));
+    std.testing.expectError(error.InvalidPadding, strip_pkcs_padding("ICE ICE BABY\x01\x02\x03\x04", AES_BLOCK_SIZE));
 }
 
 const MAX_FILE_SIZE = 50 * 1000 * 1000;
