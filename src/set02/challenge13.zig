@@ -109,7 +109,8 @@ test "Encoding user profile with invalid characters" {
 }
 
 const UserProfileEncryptor = struct {
-    aes: std.crypto.core.aes.AES128,
+    aes_enc: std.crypto.core.aes.AESEncryptCtx(std.crypto.core.aes.AES128),
+    aes_dec: std.crypto.core.aes.AESDecryptCtx(std.crypto.core.aes.AES128),
 
     const UserProfile = struct {
         allocator: *Allocator,
@@ -137,7 +138,8 @@ const UserProfileEncryptor = struct {
         }
 
         return @This(){
-            .aes = AES128.init(key),
+            .aes_enc = AES128.initEnc(key),
+            .aes_dec = AES128.initDec(key),
         };
     }
 
@@ -155,7 +157,7 @@ const UserProfileEncryptor = struct {
         while (index < plaintext.len) : (index += AES_BLOCK_SIZE) {
             // Encrypt a block of data
             var ciphertext: [AES_BLOCK_SIZE]u8 = undefined;
-            this.aes.encrypt(&ciphertext, plaintext[index..]);
+            this.aes_enc.encrypt(&ciphertext, plaintext[index..][0..AES_BLOCK_SIZE]);
 
             // Copy encrypted data over plaintext
             plaintext[index..][0..AES_BLOCK_SIZE].* = ciphertext;
@@ -176,14 +178,14 @@ const UserProfileEncryptor = struct {
         var index: usize = 0;
         while (index < plaintext.len) : (index += AES_BLOCK_SIZE) {
             // Decrypt a block of data
-            this.aes.decrypt(plaintext[index..], ciphertext[index..]);
+            this.aes_dec.decrypt(plaintext[index..][0..AES_BLOCK_SIZE], ciphertext[index..][0..AES_BLOCK_SIZE]);
         }
 
         const last_byte = plaintext[plaintext.len - 1];
         var len_without_pkcs = plaintext.len;
 
         if (last_byte < AES_BLOCK_SIZE) check_bytes: {
-            std.debug.assert(plaintext[plaintext.len - AES_BLOCK_SIZE..].len == AES_BLOCK_SIZE);
+            std.debug.assert(plaintext[plaintext.len - AES_BLOCK_SIZE ..].len == AES_BLOCK_SIZE);
             var maybe_start_of_pkcs = plaintext.len - @intCast(usize, last_byte);
             for (plaintext[maybe_start_of_pkcs..]) |byte, idx| {
                 if (byte != last_byte) {

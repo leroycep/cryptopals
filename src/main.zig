@@ -113,12 +113,12 @@ pub fn decrypt_aes128_ebc(allocator: *std.mem.Allocator, args_iter: *std.process
     const stdout = std.io.getStdOut().writer();
 
     const key = key_str[0..16];
-    const aes = AES128.init(key.*);
+    const aes = AES128.initDec(key.*);
 
     var plaintext: [16]u8 = undefined;
     var index: usize = 0;
     while (index < ciphertext.len) : (index += plaintext.len) {
-        aes.decrypt(&plaintext, ciphertext[index..]);
+        aes.decrypt(&plaintext, ciphertext[index..][0..AES128.block.block_size]);
         _ = try stdout.write(&plaintext);
     }
 }

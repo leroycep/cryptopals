@@ -10,7 +10,7 @@ const log = std.log.scoped(.challenge14);
 
 const ConsistentBlackBox = struct {
     allocator: *Allocator,
-    aes: std.crypto.core.aes.AES128,
+    aes_enc: std.crypto.core.aes.AESEncryptCtx(std.crypto.core.aes.AES128),
     text_to_prepend: []u8,
     text_to_append: []u8,
 
@@ -33,7 +33,7 @@ const ConsistentBlackBox = struct {
 
         return @This(){
             .allocator = allocator,
-            .aes = AES128.init(key),
+            .aes_enc = AES128.initEnc(key),
             .text_to_append = try std.mem.dupe(allocator, u8, &challenge12.CHALLENGE_TEXT),
             .text_to_prepend = random_prefix,
         };
@@ -77,7 +77,7 @@ const ConsistentBlackBox = struct {
         while (index < full_data.len) : (index += AES_BLOCK_SIZE) {
             // Encrypt a block of data
             var ciphertext: [AES_BLOCK_SIZE]u8 = undefined;
-            this.aes.encrypt(&ciphertext, full_data[index..]);
+            this.aes_enc.encrypt(&ciphertext, full_data[index..][0..AES_BLOCK_SIZE]);
 
             // Copy encrypted data over plaintext
             full_data[index..][0..AES_BLOCK_SIZE].* = ciphertext;

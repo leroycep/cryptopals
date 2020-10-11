@@ -5,7 +5,6 @@ const set02 = @import("../set02.zig");
 const pkcs_padding = set02.pkcs_padding;
 const AES_BLOCK_SIZE = @import("../constants.zig").AES_BLOCK_SIZE;
 
-
 const CHALLENGE_TEXT_BASE64 = @embedFile("./challenge12-text.base64");
 pub const CHALLENGE_TEXT = comptime decode_text: {
     const trimmed_text = std.mem.trim(u8, CHALLENGE_TEXT_BASE64, " \n");
@@ -16,7 +15,7 @@ pub const CHALLENGE_TEXT = comptime decode_text: {
 };
 
 const ConsistentBlackBox = struct {
-    aes: std.crypto.core.aes.AES128,
+    aes: std.crypto.core.aes.AESEncryptCtx(std.crypto.core.aes.AES128),
     text_to_append: []const u8,
 
     pub fn init() !@This() {
@@ -33,7 +32,7 @@ const ConsistentBlackBox = struct {
         }
 
         return @This(){
-            .aes = AES128.init(key),
+            .aes = AES128.initEnc(key),
             .text_to_append = &CHALLENGE_TEXT,
         };
     }
@@ -61,7 +60,7 @@ const ConsistentBlackBox = struct {
         while (index < full_data.len) : (index += AES_BLOCK_SIZE) {
             // Encrypt a block of data
             var ciphertext: [AES_BLOCK_SIZE]u8 = undefined;
-            this.aes.encrypt(&ciphertext, full_data[index..]);
+            this.aes.encrypt(&ciphertext, full_data[index..][0..AES_BLOCK_SIZE]);
 
             // Copy encrypted data over plaintext
             full_data[index..][0..AES_BLOCK_SIZE].* = ciphertext;

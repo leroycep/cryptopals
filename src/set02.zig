@@ -92,17 +92,17 @@ pub fn decrypt_aes128_cbc(allocator: *std.mem.Allocator, args_iter: *std.process
     const stdout = std.io.getStdOut().writer();
 
     const key = key_str[0..16];
-    const aes = AES128.init(key.*);
+    const aes = AES128.initDec(key.*);
 
     var prev_ciphertext_block = std.mem.zeroes([16]u8);
     var plaintext: [16]u8 = undefined;
     var index: usize = 0;
     while (index < ciphertext.len) : (index += plaintext.len) {
-        aes.decrypt(&plaintext, ciphertext[index..]);
+        aes.decrypt(&plaintext, ciphertext[index..][0..AES128.block.block_size]);
         xor.xor_slice_in_place(&plaintext, &prev_ciphertext_block);
         _ = try stdout.write(&plaintext);
 
-        prev_ciphertext_block = ciphertext[index..][0..AES_BLOCK_SIZE].*;
+        prev_ciphertext_block = ciphertext[index..][0..AES128.block.block_size].*;
     }
 }
 
