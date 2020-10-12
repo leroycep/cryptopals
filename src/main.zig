@@ -78,6 +78,10 @@ const COMMANDS = [_]Command{
         .name = "challenge14",
         .func = set02.challenge14.cmd_decrypt_challenge_text,
     },
+    .{
+        .name = "challenge16",
+        .func = set02.challenge16.cmd_bitflipping_attack,
+    },
 };
 
 pub fn decrypt_aes128_ebc(allocator: *std.mem.Allocator, args_iter: *std.process.ArgIterator) !void {
