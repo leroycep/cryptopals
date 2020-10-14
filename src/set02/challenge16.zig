@@ -91,7 +91,7 @@ const BlackBox = struct {
         }
 
         // Parse the plaintext and find out if they are an admin
-        var kv_pair_iterator = std.mem.split(plaintext, "&");
+        var kv_pair_iterator = std.mem.split(plaintext, ";");
         while (kv_pair_iterator.next()) |kv_pair| {
             // Iterator for the key and value strings
             var kv_iterator = std.mem.split(kv_pair, "=");
@@ -100,7 +100,7 @@ const BlackBox = struct {
 
             if (std.mem.eql(u8, "admin", key)) {
                 const value = kv_iterator.next() orelse continue;
-                if (std.mem.eql(u8, "admin", value)) {
+                if (std.mem.eql(u8, "true", value)) {
                     return true;
                 }
             }
@@ -113,7 +113,7 @@ pub fn cmd_bitflipping_attack(allocator: *Allocator, args_iter: *std.process.Arg
     log.info("Initializing black box", .{});
     const black_box = try BlackBox.init(allocator);
 
-    const user_token = try black_box.encrypt(allocator, "example");
+    const user_token = try black_box.encrypt(allocator, "example;admin=true");
     defer allocator.free(user_token);
     log.info("Generated user token: {x}", .{user_token});
 
