@@ -36,11 +36,23 @@ const BlackBox = struct {
     pub fn encrypt(this: @This(), allocator: *std.mem.Allocator, data: []const u8) ![]u8 {
         // The size of data with the appended text and then sized up to fit the
         // AES block size exactly
+        var full_data = std.ArrayList(u8).init(allocator); // try allocator.alloc(u8, full_data_size);
+        errdefer full_data.deinit();
+
+        // Copy data to full_data array
+        try full_data.appendSlice(PREFIX);
+        for (data) |byte| {
+            switch (byte) {
+                ';' => try full_data.appendSlice("%3B"),
+                '=' => try full_data.appendSlice("%3D"),
+                else => |regular_byte| try full_data.append(byte),
+            }
+        }
+        try full_data.appendSlice(POSTFIX);
+
+        const content_size = full_data.items.len;
         const full_data_size = calc_size: {
-            var size: usize = 0;
-            size += PREFIX.len;
-            size += data.len;
-            size += POSTFIX.len;
+            var size: usize = content_size;
 
             // Align to number of blocks
             size -= 1;
@@ -51,28 +63,21 @@ const BlackBox = struct {
 
             break :calc_size size;
         };
+        try full_data.resize(full_data_size);
 
-        var full_data = try allocator.alloc(u8, full_data_size);
-        errdefer allocator.deinit(full_data);
-
-        // Copy data to full_data array
-        std.mem.copy(u8, full_data[0..], PREFIX);
-        std.mem.copy(u8, full_data[PREFIX.len..], data);
-        std.mem.copy(u8, full_data[PREFIX.len + data.len ..], POSTFIX);
-
-        pkcs_padding(full_data, PREFIX.len + data.len + POSTFIX.len);
+        pkcs_padding(full_data.items, content_size);
 
         var index: usize = 0;
-        while (index < full_data.len) : (index += AES_BLOCK_SIZE) {
+        while (index < full_data.items.len) : (index += AES_BLOCK_SIZE) {
             // Encrypt a block of data
             var ciphertext: [AES_BLOCK_SIZE]u8 = undefined;
-            this.aes_enc.encrypt(&ciphertext, full_data[index..][0..AES_BLOCK_SIZE]);
+            this.aes_enc.encrypt(&ciphertext, full_data.items[index..][0..AES_BLOCK_SIZE]);
 
             // Copy encrypted data over plaintext
-            full_data[index..][0..AES_BLOCK_SIZE].* = ciphertext;
+            full_data.items[index..][0..AES_BLOCK_SIZE].* = ciphertext;
         }
 
-        return full_data;
+        return full_data.toOwnedSlice();
     }
 
     pub fn is_admin(this: @This(), allocator: *Allocator, ciphertext: []const u8) !bool {
