@@ -1,4 +1,5 @@
 const std = @import("std");
+const xor = @import("../xor.zig");
 const Allocator = std.mem.Allocator;
 const set02 = @import("../set02.zig");
 const challenge12 = set02.challenge12;
@@ -67,13 +68,16 @@ const BlackBox = struct {
 
         pkcs_padding(full_data.items, content_size);
 
+        var prev_ciphertext_block = std.mem.zeroes([AES_BLOCK_SIZE]u8);
         var index: usize = 0;
         while (index < full_data.items.len) : (index += AES_BLOCK_SIZE) {
             // Encrypt a block of data
             var ciphertext: [AES_BLOCK_SIZE]u8 = undefined;
+            xor.xor_slice_in_place(full_data.items[index..][0..AES_BLOCK_SIZE], &prev_ciphertext_block);
             this.aes_enc.encrypt(&ciphertext, full_data.items[index..][0..AES_BLOCK_SIZE]);
 
             // Copy encrypted data over plaintext
+            prev_ciphertext_block = ciphertext;
             full_data.items[index..][0..AES_BLOCK_SIZE].* = ciphertext;
         }
 
@@ -86,14 +90,19 @@ const BlackBox = struct {
             return error.InvalidCiphertext;
         }
 
-        var plaintext = try allocator.alloc(u8, ciphertext.len);
-        defer allocator.free(plaintext);
+        var plaintext_with_pkcs = try allocator.alloc(u8, ciphertext.len);
+        defer allocator.free(plaintext_with_pkcs);
 
         // Convert ciphertext to plaintext
+        var prev_ciphertext_block = std.mem.zeroes([AES_BLOCK_SIZE]u8);
         var index: usize = 0;
         while (index < ciphertext.len) : (index += AES_BLOCK_SIZE) {
-            this.aes_dec.decrypt(plaintext[index..][0..AES_BLOCK_SIZE], ciphertext[index..][0..AES_BLOCK_SIZE]);
+            this.aes_dec.decrypt(plaintext_with_pkcs[index..][0..AES_BLOCK_SIZE], ciphertext[index..][0..AES_BLOCK_SIZE]);
+            xor.xor_slice_in_place(plaintext_with_pkcs[index..][0..AES_BLOCK_SIZE], &prev_ciphertext_block);
+            prev_ciphertext_block = ciphertext[index..][0..AES_BLOCK_SIZE].*;
         }
+
+        const plaintext = try set02.strip_pkcs_padding(plaintext_with_pkcs, AES_BLOCK_SIZE);
 
         // Parse the plaintext and find out if they are an admin
         var kv_pair_iterator = std.mem.split(plaintext, ";");
